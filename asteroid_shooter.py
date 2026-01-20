@@ -1,3 +1,4 @@
+from trio import current_time
 import pygame
 import math
 import random
@@ -23,11 +24,16 @@ INITIAL_ASTEROID_SPAWN_RATE = 2000  # milliseconds
 MIN_ASTEROID_SPAWN_RATE = 200  # Lower minimum allows more asteroids
 ASTEROID_SPEED_MULTIPLIER = 1.0
 ASTEROID_SPEED_INCREASE = 0.08  # per second (increased for faster difficulty ramp)
+MAX_ASTEROID_SPEED = 7.0
+MAX_ASTERLOID_SIZE = 40
+SHIP_BULLET_SPEED = 10
+
 SHOOT_COOLDOWN = 300  # milliseconds between shots
 
 BOSS_SHIP_SPAWN_RATE = 10000  # milliseconds
 BOSS_SHIP_HEALTH = 10
 BOSS_SHOOT_COOLDOWN = 300  # milliseconds between shots
+BOSS_BULLET_SPEED = 5
 
 class Spaceship:
     def __init__(self, x: float, y: float):
@@ -38,6 +44,7 @@ class Spaceship:
         # Spaceship always points up
         self.angle = 0  # Angle in degrees (0 = pointing up)
     
+    ''' 
     def move_up(self):
         self.y -= self.speed
         self.y = self.y % SCREEN_HEIGHT
@@ -45,6 +52,7 @@ class Spaceship:
     def move_down(self):
         self.y += self.speed
         self.y = self.y % SCREEN_HEIGHT
+    '''
     
     def move_left(self):
         self.x -= self.speed
@@ -205,7 +213,7 @@ class Bullet:
         self.active = True
         self.origin = origin
         self.size = 3 if isinstance(self.origin, Spaceship) else 6
-        self.speed = 10 if isinstance(self.origin, Spaceship) else 5
+        self.speed = SHIP_BULLET_SPEED if isinstance(self.origin, Spaceship) else BOSS_BULLET_SPEED
 
     def update(self):
         angle_rad = math.radians(self.angle)
@@ -246,7 +254,7 @@ class Game:
         self.reset_game()
     
     def reset_game(self):
-        self.spaceship = Spaceship(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+        self.spaceship = Spaceship((SCREEN_WIDTH // 2), 9*(SCREEN_HEIGHT // 10))
         self.bullets: List[Bullet] = []
         self.asteroids: List[Asteroid] = []
         self.boss_ship: List[BossShip] = []
@@ -254,13 +262,15 @@ class Game:
         self.lives = 3
         self.score = 0
         self.game_over = False
-        self.start_time = pygame.time.get_ticks()
+        self.time = 0
+        self.start_time = 0
         self.last_asteroid_spawn = 0
         self.asteroid_spawn_rate = INITIAL_ASTEROID_SPAWN_RATE
         self.asteroid_speed_multiplier = ASTEROID_SPEED_MULTIPLIER
         self.last_shot_time = 0
         self.boss_ship_spawn_rate = BOSS_SHIP_SPAWN_RATE
         self.last_boss_ship_spawn = 0
+        self.boss_active = False
         
         # Generate starfield background
         self.stars = [(random.randint(0, SCREEN_WIDTH), random.randint(0, SCREEN_HEIGHT)) 
@@ -284,13 +294,13 @@ class Game:
         x = random.randint(0, SCREEN_WIDTH)
         y = -20
         
-        size = random.randint(20, 40)
+        size = random.randint(20, MAX_ASTERLOID_SIZE)
         asteroid = Asteroid(x, y, size, self.asteroid_speed_multiplier)
         self.asteroids.append(asteroid)
     
     def update_difficulty(self):
         """Update game difficulty based on elapsed time"""
-        elapsed_time = (pygame.time.get_ticks() - self.start_time) / 1000.0  # in seconds
+        elapsed_time = (self.time - self.start_time) / 1000.0  # in seconds
         
         # Increase asteroid spawn rate over time (decrease interval = more frequent spawning)
         # Use steeper curve for faster difficulty increase
@@ -301,45 +311,46 @@ class Game:
         )
         
         # Increase asteroid speed faster
-        self.asteroid_speed_multiplier = ASTEROID_SPEED_MULTIPLIER + (elapsed_time * ASTEROID_SPEED_INCREASE)
+        self.asteroid_speed_multiplier = min(MAX_ASTEROID_SPEED, ASTEROID_SPEED_MULTIPLIER + (elapsed_time * ASTEROID_SPEED_INCREASE))
     
-    def handle_input(self):
-        keys = pygame.key.get_pressed()
-        
-        # Allow diagonal movement by checking multiple keys
-        if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.spaceship.move_up()
-        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            self.spaceship.move_down()
-        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+    def apply_action(self, move_action: int, fire_action: int, current_time: int):
+        """
++        Two-head action:
++          move_action: 0=noop, 1=left, 2=right
++          fire_action: 0=no fire, 1=fire
++        """
+        #For movement
+        if move_action == 1:
             self.spaceship.move_left()
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+        elif move_action == 2:
             self.spaceship.move_right()
-        
-        # Continuous shooting when spacebar is held
-        if keys[pygame.K_SPACE]:
-            current_time = pygame.time.get_ticks()
-            if current_time - self.last_shot_time > SHOOT_COOLDOWN:
+
+        #For shooting
+        if fire_action == 1:
+            if current_time - self.last_shot_time >= SHOOT_COOLDOWN:
                 self.shoot()
                 self.last_shot_time = current_time
     
     def shoot(self):
         """Create a new bullet from the spaceship (always shoots up)"""
-        bullet = Bullet(self.spaceship.x, self.spaceship.y, 0, self.spaceship)  # 0 = up
+        bullet = Bullet(self.spaceship.x, self.spaceship.y, 0, self.spaceship)  
         self.bullets.append(bullet)
     
-    def update(self):
+    def step(self, move_action: int, fire_action: int, delta_time: int = int(1000/FPS)):
+
         if self.game_over:
             return
         
         # Update difficulty
+        self.time += delta_time
+        current_time = self.time
+
         self.update_difficulty()
         
-        # Handle input
-        self.handle_input()
-        
+        # Apply action for this tick
+        self.apply_action(move_action, fire_action, current_time)
+
         # Spawn new asteroids
-        current_time = pygame.time.get_ticks()
         if current_time - self.last_asteroid_spawn > self.asteroid_spawn_rate:
             self.spawn_asteroid()
             self.last_asteroid_spawn = current_time
@@ -350,10 +361,11 @@ class Game:
             if asteroid.is_off_screen():
                 self.asteroids.remove(asteroid)
 
-        if current_time - self.last_boss_ship_spawn > self.boss_ship_spawn_rate:
+        if not self.boss_active and current_time - self.last_boss_ship_spawn > self.boss_ship_spawn_rate:
             self.spawn_boss_ship()
             self.last_boss_ship_spawn = current_time
-        
+            self.boss_active = True
+
         # Update boss ship
         for boss_ship in self.boss_ship[:]:
             boss_ship.update(current_time, self.bullets)
@@ -397,6 +409,7 @@ class Game:
                     self.bullets.remove(bullet)
                     boss_ship.health -= 1
                     if boss_ship.health <= 0:
+                        self.boss_active = False
                         self.boss_ship.remove(boss_ship)
                         self.score += 50
                     break
@@ -423,16 +436,13 @@ class Game:
                     self.asteroids.remove(asteroid)
                     # Brief invincibility could be added here
                 break
-        
-        
-
     
     def draw(self):
         self.screen.fill(BLACK)
         
         # Draw stars (background effect)
         for x, y in self.stars:
-            pygame.draw.circle(self.screen, WHITE, (x, y), 1)
+            pygame.draw.circle(self.screen, WHITE, (x, y), random.randint(1, 3))
         
         if not self.game_over:
             # Draw spaceship
@@ -483,7 +493,25 @@ class Game:
                     if event.key == pygame.K_r and self.game_over:
                         self.reset_game()
             
-            self.update()
+            # For manual testing, we can use keyboard input
+            move_action = 0
+            fire_action = 0
+
+            keys = pygame.key.get_pressed()
+            left = keys[pygame.K_LEFT] or keys[pygame.K_a]
+            right = keys[pygame.K_RIGHT] or keys[pygame.K_d]
+            if left and not right:
+                move_action = 1
+            elif right and not left:
+                move_action = 2
+            else:
+                move_action = 0
+
+            if keys[pygame.K_SPACE]:
+                fire_action = 1
+
+            self.step(move_action, fire_action)
+
             self.draw()
             self.clock.tick(FPS)
         

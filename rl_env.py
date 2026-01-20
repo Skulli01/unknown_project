@@ -1,5 +1,7 @@
 import gymnasium as gym
 import numpy as np
+import sys
+import argparse
 from asteroid_shooter import ( 
     BOSS_SHIP_HEALTH,
     SCREEN_WIDTH, 
@@ -7,7 +9,7 @@ from asteroid_shooter import (
     FPS, 
     SHOOT_COOLDOWN,
     MAX_ASTEROID_SPEED,
-    MAX_ASTERLOID_SIZE,
+    MAX_ASTEROID_SIZE,
     BOSS_BULLET_SPEED,
     SHIP_BULLET_SPEED,
     Game,
@@ -47,14 +49,11 @@ class AsteroidEnv(gym.Env):
         self.action_space = gym.spaces.MultiDiscrete([3, 2])
 
         #Structured observations
-        self.strucutured_obs_size = {
-        "ship_features": 4,  # [x, y, can shoot, lives]
-        "asteroid_features": 5,  # K * [x, y, dx, dy, size]
-        "boss_features": 3,  # K * [x, y, time_until_shoot,lives]
-        "boss_bullet_features": 4,  # K * [x, y, dx, dy]
-        }
-
-        self.obs_dim = sum(self.strucutured_obs_size.values())
+        self.ship_feat = 4
+        self.boss_feat = 4
+        self.ast_feat = 5
+        self.bul_feat = 4
+        self.obs_dim = self.ship_feat + self.boss_feat + self.k_asteroids*self.ast_feat + self.k_boss_bullets*self.bul_feat
 
         self.observation_space = gym.spaces.Box(
             low=-1.0,
@@ -163,7 +162,7 @@ class AsteroidEnv(gym.Env):
         # If you use the internal clock (t_ms) from earlier refactor:
 
         try:
-            can_shoot = 1.0 if (self.game.time - ship.last_shot_time) >= ship.SHOOT_COOLDOWN else 0.0
+            can_shoot = 1.0 if (self.game.time - ship.last_shot_time) >= SHOOT_COOLDOWN else 0.0
         
         except Exception:
             can_shoot = 0.0
@@ -210,12 +209,12 @@ class AsteroidEnv(gym.Env):
             dy = (a.y - ship.y) / SCREEN_HEIGHT
             vx = float(a.vx) / MAX_ASTEROID_SPEED
             vy = float(a.vy) / MAX_ASTEROID_SPEED
-            size = float(a.size) / MAX_ASTERLOID_SIZE
+            size = float(a.size) / MAX_ASTEROID_SIZE
             feats.extend([dx, dy, vx, vy, size])
 
         # pad
-        while len(feats) < k * self.strucutured_obs_size["asteroid_features"]:
-            feats.extend([0.0] * self.strucutured_obs_size["asteroid_features"])
+        while len(feats) < k * self.ast_feat:
+            feats.extend([0.0] * self.ast_feat)
 
         return np.array(feats, dtype=np.float32)
     
@@ -245,12 +244,42 @@ class AsteroidEnv(gym.Env):
 
             feats.extend([dx, dy, vx, vy])
 
-        while len(feats) < k * self.strucutured_obs_size["boss_bullet_features"]:
-            feats.extend([0.0] * self.strucutured_obs_size["boss_bullet_features"])
+        while len(feats) < k * self.bul_feat:
+            feats.extend([0.0] * self.bul_feat)
 
         return np.array(feats, dtype=np.float32)
 
     def _count_player_bullets(self) -> int:
         return sum(1 for b in self.game.bullets if isinstance(b.origin, Spaceship))
 
-a = AsteroidEnv()
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description="gym environment for asteroid shooter")
+    parser.add_argument("mode", choices=["train", "random_play", "play"])
+    mode = sys.argv[1]
+
+    args = parser.parse_args()
+
+    mode = args.mode
+
+    if mode == "play":
+        game = Game(render_mode="human")
+        game.run()
+
+    elif mode == "random_play":
+        env = AsteroidEnv(render_mode="human")
+        obs, info = env.reset()
+
+        done = False
+        while True:
+            # IMPORTANT: keep pygame responsive
+            import pygame
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    env.close()
+                    raise SystemExit
+
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            if terminated or truncated:
+                obs, info = env.reset()

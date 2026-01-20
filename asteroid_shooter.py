@@ -25,7 +25,7 @@ MIN_ASTEROID_SPAWN_RATE = 200  # Lower minimum allows more asteroids
 ASTEROID_SPEED_MULTIPLIER = 1.0
 ASTEROID_SPEED_INCREASE = 0.08  # per second (increased for faster difficulty ramp)
 MAX_ASTEROID_SPEED = 7.0
-MAX_ASTERLOID_SIZE = 40
+MAX_ASTEROID_SIZE = 40
 SHIP_BULLET_SPEED = 10
 
 SHOOT_COOLDOWN = 300  # milliseconds between shots
@@ -244,7 +244,7 @@ def check_collision(obj1, obj2) -> bool:
 
 
 class Game:
-    def __init__(self):
+    def __init__(self, render_mode='human'):
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Asteroid Shooter")
         self.clock = pygame.time.Clock()
@@ -294,7 +294,7 @@ class Game:
         x = random.randint(0, SCREEN_WIDTH)
         y = -20
         
-        size = random.randint(20, MAX_ASTERLOID_SIZE)
+        size = random.randint(20, MAX_ASTEROID_SIZE)
         asteroid = Asteroid(x, y, size, self.asteroid_speed_multiplier)
         self.asteroids.append(asteroid)
     

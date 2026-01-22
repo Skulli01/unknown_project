@@ -49,8 +49,8 @@ class AsteroidEnv(gym.Env):
         self.action_space = gym.spaces.MultiDiscrete([3, 2])
 
         #Structured observations
-        self.ship_feat = 4
-        self.boss_feat = 4
+        self.ship_feat = 3
+        self.boss_feat = 3
         self.ast_feat = 5
         self.bul_feat = 4
         self.obs_dim = self.ship_feat + self.boss_feat + self.k_asteroids*self.ast_feat + self.k_boss_bullets*self.bul_feat
@@ -61,8 +61,6 @@ class AsteroidEnv(gym.Env):
             shape=(self.obs_dim,),
             dtype=np.float32,
         )
-
-
 
         # --- Game instance ---
         # If your Game always opens a window, this will still work,
@@ -75,9 +73,11 @@ class AsteroidEnv(gym.Env):
         self.step_count = 0
 
         # For reward shaping via deltas
-        self._prev_score = 0
+        self._prev_ast_score = 0
+        self._prev_boss_score = 0
         self._prev_lives = 0
         self._prev_player_bullet_count = 0
+        self._prev_boss_health = 0.0
 
     def reset(self, seed: int | None = None, options = None):
         super().reset(seed=seed)
@@ -88,9 +88,11 @@ class AsteroidEnv(gym.Env):
         self.game.reset_game()
         self.step_count = 0
 
-        self._prev_score = self.game.score
+        self._prev_ast_score = self.game.ast_score
+        self._prev_boss_score = self.game.boss_score
         self._prev_lives = self.game.lives
         self._prev_player_bullet_count = self._count_player_bullets()
+        self._prev_boss_health = self.game.boss_ship[0].health if self.game.boss_active else 0.0
 
         obs = self._get_obs()
         info = {}
@@ -101,7 +103,8 @@ class AsteroidEnv(gym.Env):
         move_action, fire_action = int(action[0]), int(action[1])
 
         # Track before-state for reward deltas
-        prev_score = self.game.score
+        prev_ast_score = self.game.ast_score
+        prev_boss_score = self.game.boss_score
         prev_lives = self.game.lives
         prev_player_bullets = self._count_player_bullets()
 
@@ -109,29 +112,50 @@ class AsteroidEnv(gym.Env):
         self.game.step(move_action, fire_action, self.delta_time)
         self.step_count += 1
 
-        score_delta = self.game.score - prev_score
-        lives_delta = self.game.lives - prev_lives
+        ast_score_delta = self.game.ast_score - prev_ast_score
+        boss_score_delta = self.game.boss_score - prev_boss_score
+
+        lives_delta = prev_lives - self.game.lives
         did_shoot = self._count_player_bullets() > prev_player_bullets
 
-        reward = 0.0
-        reward += 1.0 * float(score_delta)                 # asteroid kills etc.
-        reward += -20.0 * float(max(0, -lives_delta))      # losing a life is bad
-        reward += 0.01
+        # Calculate boss health delta only if the boss is active
+        if self.game.boss_active:
+            boss_health_delta = self._prev_boss_health - self.game.boss_ship[0].health
+        else:
+            boss_health_delta = 0.0
 
+        reward = 0.0
+        reward += 2.0 * float(ast_score_delta)    
+        reward += 10.0 * boss_score_delta          # asteroid kills and boss kills.
+        reward += -10.0 * float(max(0, lives_delta))      # losing a life is bad 
+        reward += 2.0 * boss_health_delta
+
+        if did_shoot:
+            reward -= 0.001
+        
+        # Update previous boss health only if the boss is active
+        self._prev_boss_health = (
+            self.game.boss_ship[0].health if self.game.boss_active else 0.0
+        )
+
+        #print("reward gained:")
         # --- Termination / truncation ---
         terminated = bool(self.game.game_over)
         truncated = bool(self.step_count >= self.max_steps)
+        
+        if terminated:
+            reward -= 70.0  # heavy penalty for dying
 
-
-        if did_shoot:
-            reward -= 0.01
+        
 
         obs = self._get_obs()  
         info = {
-            "score_delta": score_delta,
+            "ast_score_delta": ast_score_delta,
+            "boss_score_delta": boss_score_delta,
             "lives_delta": lives_delta,
             "did_shoot": did_shoot,
-            "score": self.game.score,
+            "ast_score": self.game.ast_score,
+            "boss_score": self.game.boss_score,
             "lives": self.game.lives,
         }     
 
@@ -153,35 +177,31 @@ class AsteroidEnv(gym.Env):
             pass
     
     def _get_obs(self) -> np.ndarray:
-
         ship = self.game.spaceship
         sx = ship.x / SCREEN_WIDTH
-        sy = ship.y / SCREEN_HEIGHT
+        #sy = ship.y / SCREEN_HEIGHT
 
         # can_shoot: based on cooldown (requires  game to track last_shot_time and internal clock)
         # If you use the internal clock (t_ms) from earlier refactor:
 
         try:
             can_shoot = 1.0 if (self.game.time - ship.last_shot_time) >= SHOOT_COOLDOWN else 0.0
-        
         except Exception:
             can_shoot = 0.0
 
         lives_norm = float(self.game.lives) / 3.0
-        ship_feats = np.array([sx, sy, can_shoot, lives_norm], dtype=np.float32)
-
+        ship_feats = np.array([sx, can_shoot, lives_norm], dtype=np.float32)
         boss_exists = float(self.game.boss_active)
 
         if boss_exists:
             boss = self.game.boss_ship[0]
             boss_to_ship_dx = (boss.x - ship.x) / SCREEN_WIDTH
-            boss_to_ship_dy = (boss.y - ship.y) / SCREEN_HEIGHT
+            #boss_to_ship_dy = (boss.y - ship.y) / SCREEN_HEIGHT
             boss_health_norm = float(boss.health) / BOSS_SHIP_HEALTH
-            # Better: divide by BOSS_SHIP_HEALTH if you import it.
-            boss_feats = np.array([1.0, boss_to_ship_dx, boss_to_ship_dy, np.clip(boss_health_norm, 0.0, 1.0)], dtype=np.float32)
+            boss_feats = np.array([1.0, boss_to_ship_dx, np.clip(boss_health_norm, 0.0, 1.0)], dtype=np.float32)
         else:
-            boss_feats = np.zeros((4,), dtype=np.float32)
-        
+            boss_feats = np.zeros((3,), dtype=np.float32)
+
         # Asteroids: take K nearest
         ast_feats = self._asteroid_features(ship, self.k_asteroids)
 
@@ -190,8 +210,20 @@ class AsteroidEnv(gym.Env):
 
         obs = np.concatenate([ship_feats, boss_feats, ast_feats, bul_feats], axis=0)
 
+        #Debug prints for observation
+        """print("Ship features:", ship_feats)
+        print("Boss features:", boss_feats)
+        print("Asteroid features:", ast_feats)
+        print("Boss bullet features:", bul_feats)"""
+
         # Clamp to [-1, 1] since we promised that in observation_space
         obs = np.clip(obs, -1.0, 1.0).astype(np.float32)
+        #(obs.shape)
+        # Validate observation dimensions and normalization
+        assert obs.shape == self.observation_space.shape, f"Observation shape mismatch! Expected {self.observation_space.shape}, got {obs.shape}"
+        assert np.all(obs >= self.observation_space.low), "Observation values below minimum!"
+        assert np.all(obs <= self.observation_space.high), "Observation values above maximum!"
+
         return obs
         
     def _asteroid_features(self, ship: Spaceship, k: int) -> np.ndarray:
@@ -221,7 +253,7 @@ class AsteroidEnv(gym.Env):
     def _boss_bullet_features(self, ship: Spaceship, k: int) -> np.ndarray:
 
         boss_bullets = [b for b in self.game.bullets if isinstance(b.origin, BossShip)]
-
+        
         # sort by distance
         def d2(b):
             dx = b.x - ship.x
@@ -243,7 +275,6 @@ class AsteroidEnv(gym.Env):
             vy /= BOSS_BULLET_SPEED
 
             feats.extend([dx, dy, vx, vy])
-
         while len(feats) < k * self.bul_feat:
             feats.extend([0.0] * self.bul_feat)
 

@@ -20,20 +20,20 @@ GREEN = (0, 255, 0)
 YELLOW = (255, 255, 0)
 
 # Game settings
-INITIAL_ASTEROID_SPAWN_RATE = 2000  # milliseconds
-MIN_ASTEROID_SPAWN_RATE = 200  # Lower minimum allows more asteroids
+INITIAL_ASTEROID_SPAWN_RATE = 3000  # milliseconds
+MIN_ASTEROID_SPAWN_RATE = 1000  # Lower minimum allows more asteroids
 ASTEROID_SPEED_MULTIPLIER = 1.0
-ASTEROID_SPEED_INCREASE = 0.08  # per second (increased for faster difficulty ramp)
-MAX_ASTEROID_SPEED = 7.0
+ASTEROID_SPEED_INCREASE = 0.04  # per second (increased for faster difficulty ramp)
+MAX_ASTEROID_SPEED = 4.0
 MAX_ASTEROID_SIZE = 40
 SHIP_BULLET_SPEED = 10
 
 SHOOT_COOLDOWN = 300  # milliseconds between shots
 
 BOSS_SHIP_SPAWN_RATE = 10000  # milliseconds
-BOSS_SHIP_HEALTH = 10
-BOSS_SHOOT_COOLDOWN = 300  # milliseconds between shots
-BOSS_BULLET_SPEED = 5
+BOSS_SHIP_HEALTH = 5
+BOSS_SHOOT_COOLDOWN = 450  # milliseconds between shots
+BOSS_BULLET_SPEED = 3
 
 class Spaceship:
     def __init__(self, x: float, y: float):
@@ -161,7 +161,7 @@ class Asteroid:
         self.y = y
         self.size = size
         # Random velocity - can come from any angle, but always moving downward (vy < 0)
-        base_speed = random.uniform(1, 3) * speed_multiplier
+        base_speed = random.uniform(1, 2) * speed_multiplier
         # Horizontal velocity can be any direction
         self.vx = random.uniform(-base_speed, base_speed)
         # Vertical velocity must be negative (downward)
@@ -260,7 +260,8 @@ class Game:
         self.boss_ship: List[BossShip] = []
 
         self.lives = 3
-        self.score = 0
+        self.boss_score = 0
+        self.ast_score = 0
         self.game_over = False
         self.time = 0
         self.start_time = 0
@@ -279,6 +280,11 @@ class Game:
         # Spawn initial asteroids
         for _ in range(5):
             self.spawn_asteroid()
+        
+
+    @property
+    def total_score(self):
+        return 50*self.boss_score + self.ast_score
     
     def spawn_boss_ship(self):
         """Spawn a boss ship from the top of the screen"""
@@ -304,7 +310,7 @@ class Game:
         
         # Increase asteroid spawn rate over time (decrease interval = more frequent spawning)
         # Use steeper curve for faster difficulty increase
-        spawn_rate_reduction = 1 + (elapsed_time * elapsed_time / 150.0)  # Steeper quadratic for faster reduction
+        spawn_rate_reduction = 1 + (elapsed_time * elapsed_time / 450.0)  # Steeper quadratic for faster reduction
         self.asteroid_spawn_rate = max(
             MIN_ASTEROID_SPAWN_RATE,
             INITIAL_ASTEROID_SPAWN_RATE / spawn_rate_reduction
@@ -385,7 +391,7 @@ class Game:
                     self.bullets.remove(bullet)
                     self.asteroids.remove(asteroid)
                     # Increment score when asteroid is destroyed
-                    self.score += 1
+                    self.ast_score += 1
                     # Break into smaller asteroids or remove
                     if asteroid.size > 25:
                         # Split into 2 smaller asteroids
@@ -411,7 +417,7 @@ class Game:
                     if boss_ship.health <= 0:
                         self.boss_active = False
                         self.boss_ship.remove(boss_ship)
-                        self.score += 50
+                        self.boss_score += 1
                     break
 
         # Check boss_bullet-spaceship collisions
@@ -461,7 +467,7 @@ class Game:
                 boss_ship.draw(self.screen)
         
         # Draw UI
-        score_text = self.font.render(f"Score: {self.score}", True, WHITE)
+        score_text = self.font.render(f"Score: {self.total_score}", True, WHITE)
         self.screen.blit(score_text, (10, 10))
         
         lives_text = self.font.render(f"Lives: {self.lives}", True, WHITE)
@@ -472,7 +478,7 @@ class Game:
             text_rect = game_over_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 30))
             self.screen.blit(game_over_text, text_rect)
             
-            final_score_text = self.font.render(f"Final Score: {self.score}", True, WHITE)
+            final_score_text = self.font.render(f"Final Score: {self.total_score}", True, WHITE)
             score_rect = final_score_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 10))
             self.screen.blit(final_score_text, score_rect)
             

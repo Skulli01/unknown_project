@@ -5,13 +5,13 @@ from rl_env import AsteroidEnv
 
 def main():
     # Create the environment
-    env = make_vec_env(lambda: AsteroidEnv(render_mode=None), n_envs=1)
+    env = make_vec_env(lambda: AsteroidEnv(render_mode=None), n_envs=8)
     print("Environment created.")
     # Initialize the model
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_asteroid_tensorboard/")
+    model = PPO("MlpPolicy", env, verbose=1, target_kl=0.01, learning_rate=1e-4, tensorboard_log="./ppo_asteroid_tensorboard/")
     print("Model initialized.")
     # Train the model
-    timesteps = 1_000  # Adjust based on your needs
+    timesteps = 3_000_000  # Adjust based on your needs
     model.learn(total_timesteps=timesteps)
     print("Model training completed.")
     # Save the model

@@ -4,7 +4,8 @@ This project contains simple games that can be played by users, with the ability
 
 ## Asteroid Shooter Game
 
-A simple 2D asteroid shooter game built with Python and Pygame.
+A simple 2D asteroid shooter game built with Python and Pygame. 
+PPO used to train an agent to play the game.
 
 ### Features
 
@@ -21,24 +22,4 @@ A simple 2D asteroid shooter game built with Python and Pygame.
    pip install -r requirements.txt
    ```
 
-### How to Play
 
-Run the game:
-```bash
-python asteroid_shooter.py
-```
-
-**Controls:**
-- **Arrow Keys** or **WASD**: Rotate spaceship (Left/Right or A/D) and move forward (Up or W)
-- **Space**: Shoot bullets
-- **R**: Restart after Game Over
-
-**Objective:**
-- Survive as long as possible by shooting asteroids and avoiding collisions
-- Each asteroid collision costs one life
-- Large asteroids split into smaller ones when hit
-- Game becomes progressively harder over time
-
-### Future: Reinforcement Learning
-
-The next phase will add reinforcement learning capabilities to train an AI agent to play the game autonomously.

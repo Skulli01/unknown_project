@@ -2,6 +2,11 @@ import gymnasium as gym
 import numpy as np
 import sys
 import argparse
+import os
+import csv
+import pygame
+import shutil
+from pathlib import Path
 from asteroid_shooter import ( 
     BOSS_SHIP_HEALTH,
     SCREEN_WIDTH, 
@@ -33,7 +38,7 @@ class AsteroidEnv(gym.Env):
         self,
         render_mode: str | None = None,
         max_steps: int = 60*FPS,
-        k_asteroids: int = 5,
+        k_asteroids: int = 3,
         k_boss_bullets: int = 5,
         delta_time: int = int(1000/FPS)
     ):
@@ -78,6 +83,15 @@ class AsteroidEnv(gym.Env):
         self._prev_lives = 0
         self._prev_player_bullet_count = 0
         self._prev_boss_health = 0.0
+
+        self.debug_dir = "./debug_logs"
+        self._clear_debug_dir()
+
+        os.makedirs(self.debug_dir, exist_ok=True)
+        self.obs_log_file = os.path.join(self.debug_dir, "observations.csv")
+        with open(self.obs_log_file, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["step", "asteroid_feats", "bullet_feats"])  # Add more columns if needed
 
     def reset(self, seed: int | None = None, options = None):
         super().reset(seed=seed)
@@ -127,11 +141,10 @@ class AsteroidEnv(gym.Env):
         reward = 0.0
         reward += 2.0 * float(ast_score_delta)    
         reward += 10.0 * boss_score_delta          # asteroid kills and boss kills.
-        reward += -10.0 * float(max(0, lives_delta))      # losing a life is bad 
+        reward += -50.0 * float(max(0, lives_delta))      # losing a life is bad 
         reward += 2.0 * boss_health_delta
 
-        if did_shoot:
-            reward -= 0.001
+        reward += 0.01
         
         # Update previous boss health only if the boss is active
         self._prev_boss_health = (
@@ -161,6 +174,20 @@ class AsteroidEnv(gym.Env):
 
         if self.render_mode == "human":
             self.render()
+
+        # Save observation and screenshot only once per second
+        if self.step_count % FPS == 0:  # Assuming FPS is the game's frame rate
+            #print(f"asteroid {self.step_count}: x={self.ast_feats[0]}, y={self.ast_feats[1]}")
+            #print(f"bullet {self.step_count}: x={self.bul_feats[0]}, y={self.bul_feats[1]}")
+            step_id = self.step_count
+            #obs_list = obs.tolist()  # Convert numpy array to list for logging
+
+            with open(self.obs_log_file, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([step_id, self.ast_feats, self.bul_feats])
+
+            screenshot_path = os.path.join(self.debug_dir, f"screenshot_{step_id}.png")
+            pygame.image.save(self.game.screen, screenshot_path)
 
         return obs, float(reward), terminated, truncated, info
     
@@ -215,6 +242,9 @@ class AsteroidEnv(gym.Env):
         print("Boss features:", boss_feats)
         print("Asteroid features:", ast_feats)
         print("Boss bullet features:", bul_feats)"""
+        
+        self.ast_feats = ast_feats
+        self.bul_feats = bul_feats
 
         # Clamp to [-1, 1] since we promised that in observation_space
         obs = np.clip(obs, -1.0, 1.0).astype(np.float32)
@@ -234,9 +264,9 @@ class AsteroidEnv(gym.Env):
             return np.sqrt((a.x - ship.x) ** 2 + (a.y - ship.y) ** 2)
     
         asteroids.sort(key=distance)
-
+        
         feats = []
-        for a in asteroids[:k]:
+        for i_closest, a in enumerate(asteroids[:k]):
             dx = (a.x - ship.x) / SCREEN_WIDTH
             dy = (a.y - ship.y) / SCREEN_HEIGHT
             vx = float(a.vx) / MAX_ASTEROID_SPEED
@@ -255,16 +285,16 @@ class AsteroidEnv(gym.Env):
         boss_bullets = [b for b in self.game.bullets if isinstance(b.origin, BossShip)]
         
         # sort by distance
-        def d2(b):
+        def distance(b):
             dx = b.x - ship.x
             dy = b.y - ship.y
-            return dx * dx + dy * dy
+            return (dx ** 2) + (dy ** 2)
 
-        boss_bullets.sort(key=d2)
+        boss_bullets.sort(key=distance)
 
         feats = []
         for b in boss_bullets[:k]:
-            dx = (b.x - ship.x) / SCREEN_WIDTH
+            dx = (b.x - ship.x) / SCREEN_WIDTH 
             dy = (b.y - ship.y) / SCREEN_HEIGHT
 
             # derive velocity from angle+speed (consistent with your Bullet.update)
@@ -282,6 +312,18 @@ class AsteroidEnv(gym.Env):
 
     def _count_player_bullets(self) -> int:
         return sum(1 for b in self.game.bullets if isinstance(b.origin, Spaceship))
+
+    def _clear_debug_dir(self):
+        d = Path(self.debug_dir)
+        if d.exists():
+            # delete everything inside debug_logs
+            for p in d.iterdir():
+                if p.is_file() or p.is_symlink():
+                    p.unlink()
+                else:
+                    shutil.rmtree(p)
+        else:
+            d.mkdir(parents=True, exist_ok=True)
 
 if __name__ == "__main__":
 
